@@ -92,12 +92,13 @@ int main(int argc, char *argv[])
 void dostuff (int sock)
 {
    int n;
-   char buffer[320];
-      
-   bzero(buffer,320);
-   n = read(sock,buffer, 319);
+   char buffer[400];
+   bzero(buffer,400);
+   n = read(sock,buffer, 399);
    if (n < 0) error("ERROR reading from socket");
-   printf("HTTP Request Message:\n\n%s\n",buffer);
+   printf("HTTP Request Message:\n%s\n",buffer);
    n = write(sock,"I got your message",18);
    if (n < 0) error("ERROR writing to socket");
+   printf("HTTP Response Message:\n");
+   
 }
