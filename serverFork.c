@@ -117,6 +117,14 @@ ResponseMessage* newMessage()
 	return msg;
 }
 
+
+void deleteMessage(ResponseMessage *msg)
+{
+	free(msg->headers);
+	free(msg->data);
+	free(msg);
+}
+
 void sendMessage(int sock, ResponseMessage *msg, int fileSize)
 {
 	char **temp;
@@ -136,39 +144,37 @@ void sendMessage(int sock, ResponseMessage *msg, int fileSize)
 
 	n = write(sock, "\n", 1);
 
-	n = write(sock, msg->data, fileSize);
+	if(msg->data != NULL && fileSize != 0)
+		n = write(sock, msg->data, fileSize);
 	if (n < 0) error("ERROR writing to socket");
 }
 
 void addHeaderLine(ResponseMessage *msg, char* header)
 {
 	int i;
-	for(i = 0; i < numHeaders; i++)
+	for(i = 0; i < numHeaders - 1; i++)
 	{
 		if(msg->headers[i] == NULL)
 			break;		
 	} 
-	msg->headers[i] = header;
+	if(i < numHeaders - 1)		//last element must be NULL
+		msg->headers[i] = header;
 }
 
-/*
-static char response[3000] = 
-"HTTP/1.1 200 OK\n\
-Connection: close\n\
-Date: ";
+///////////////////
+static char rootResponse[200] = "<html><head><title>Something went wrong!</title></head>\
+<body><h1>You need to specify a file to download.</h1></body></html>";
 
-static char response1[3000] = 
-"\n\
-Server: Custom server\n\
-Last-Modified: \n\
-Content-Type: text/html\n\
-\n\
-<html><head><title>Hello, World</title></head>\
-<body><h1>Hello, World!</h1>   </body></html>";
+static char fileNotFoundResponse[200] = "<html><head><title>Something went wrong!</title></head>\
+<body><h1>File cannot be found on server.</h1></body></html>";
 
-*/
+static char wrongFileTypeResponse[200] = "<html><head><title>Something went wrong!</title></head>\
+<body><h1>File type not supported.</h1></body></html>";
 
+static char internalErrorResponse[200] = "<html><head><title>Something went wrong!</title></head>\
+<body><h1>Internal error on server side.</h1></body></html>";
 
+///////////////////
 void dostuff (int sock)
 {
    int n;
@@ -181,12 +187,11 @@ void dostuff (int sock)
 	FILE* file;
 	char *fileName;
 	char *fileType;
+	char *httpVer;
 	char sizeHeader[40];
 	int fileSize;
-char c;
+	char c;
 	struct stat st;
-
-	
 
 	////
 	ResponseMessage *msg = newMessage();
@@ -194,27 +199,62 @@ char c;
 	msg->status = "HTTP/1.1 200 OK";
 	addHeaderLine(msg, "Connection: close");
 	
-	
+////////	
    bzero(buffer,512);
    n = read(sock,buffer,511);
-   if (n < 0) error("ERROR reading from socket");
+   if (n < 0) 
+		error("ERROR reading from socket");
    printf("Here is the message: %s\n",buffer);
-	
+////////
+
+
+	//parse file name	
 	fileName = strchr(buffer, '/');
-	fileName = strtok(++fileName, " ");
+	++fileName;			//++ to go over /
+	if(fileName[0] == ' ')
+	{
+		msg->status = "HTTP/1.1 400 Bad Request";
+		msg->data = rootResponse;
+		sendMessage(sock, msg, strlen(msg->data));
+		exit(0);
+	}
 
+	//parse file type
+	fileName = strtok(fileName, " ");	
 	fileType = strchr(fileName, '.');
-	fileType++;
-	printf("type is %s \n", fileType);
-
-
+	++fileType;			//++ to go over .	
+	
+	//read file stats
 	if (stat(fileName, &st) == -1) 
 	{
 		printf("%s\n", fileName);
 		perror("stat");
-		exit(EXIT_FAILURE);
+
+		msg->status = "HTTP/1.1 404 Not Found";
+		msg->data = fileNotFoundResponse;
+		sendMessage(sock, msg, strlen(msg->data));
+
+		exit(0);
    }
 
+	//check file type
+	if(!strcmp(fileType, "html"))
+		addHeaderLine(msg, "Content-Type: text/html");
+	else if(!strcmp(fileType, "jpg"))
+		addHeaderLine(msg, "Content-Type: image/jpg");
+	else if(!strcmp(fileType, "jpeg"))
+		addHeaderLine(msg, "Content-Type: image/jpeg");
+	else if(!strcmp(fileType, "gif"))
+		addHeaderLine(msg, "Content-Type: image/gif");
+	else
+	{
+		msg->status = "HTTP/1.1 400 Bad Request";
+		msg->data = wrongFileTypeResponse;
+		sendMessage(sock, msg, strlen(msg->data));
+		exit(0);
+	}
+
+	//prepare message header files
 	time (&rawtime); 
 	timeinfo = gmtime (&rawtime);	
 	strftime(date, 80, "Date: %a, %d %b %Y %X GMT", timeinfo);
@@ -222,7 +262,6 @@ char c;
 
 	addHeaderLine(msg, "Server: Custom server");
 
-	//last modified
 	timeinfo = gmtime (&st.st_mtime);	
 	strftime(lastMod, 80, "Last-Modified: %a, %d %b %Y %X GMT", timeinfo);
 	addHeaderLine(msg, lastMod);
@@ -231,55 +270,33 @@ char c;
 	snprintf(sizeHeader, 40, "Content-Length: %d", fileSize);
 	addHeaderLine(msg, sizeHeader);
 
-	if(!strcmp(fileType, "html"))
-		addHeaderLine(msg, "Content-Type: text/html");
-	else if(!strcmp(fileType, "jpg"))
-		addHeaderLine(msg, "Content-Type: image/jpg");
-	else
-		addHeaderLine(msg, "Content-Type: image/gif");
-//	addHeaderLine(msg, "Connection: close");
-
+	//read and send file
 	msg->data = (char*)malloc(sizeof(char) * (fileSize + 1));
 	if(msg->data == NULL)
+	{
 		printf("Error malloc.\n");
-	else
-		printf("No error.\n");
+		msg->data = internalErrorResponse;
+		sendMessage(sock, msg, strlen(msg->data));
+		exit(0);
+	}
+
 	file = fopen(fileName, "r");
 	if (file != NULL) 
 	{
 		size_t newLen = fread(msg->data, sizeof(char), fileSize, file);
 		if (newLen == 0)
-		    fputs("Error reading file", stderr);
-		else
 		{
-			printf("%d bytes. \n", newLen);	
-		   msg->data[newLen] = '\0'; 
-		//	printf("%d bytes. \n", newLen);			
+		    fputs("Error reading file", stderr);
+			 msg->data = internalErrorResponse;
+			 sendMessage(sock, msg, strlen(msg->data));
+			 exit(0);
 		}
+		else
+		   msg->data[newLen] = '\0'; 		
 
 		fclose(file);
 	}
-////////////////
- /*  n = write(sock,response, strlen(response));
-
-	strftime(date, 80, "%c GMT", timeinfo);
-
-	n = write(sock,date, strlen(date));
-
-	n = write(sock,response1, strlen(response1));
-
-   if (n < 0) error("ERROR writing to socket");*/
 
 	sendMessage(sock, msg, fileSize);
-/*
-	n = open(fileName, O_RDONLY);
-	while ( (n = read(file, &c, 1)) )
-	{
-        if ( n < 0 )
-            error("ERROR reading from file.");
-        if ( write(sock, &c, 1) < 1 )
-            error("ERROR sending file.");
-   }
-	**/
+	deleteMessage(msg);
 }
-
