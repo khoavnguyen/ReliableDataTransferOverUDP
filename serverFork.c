@@ -237,7 +237,7 @@ void dostuff (int sock)
 		exit(0);
    }
 
-	//check file type
+	// Content-Type Header: check file type
 	if(!strcmp(fileType, "html"))
 		addHeaderLine(msg, "Content-Type: text/html");
 	else if(!strcmp(fileType, "jpg"))
