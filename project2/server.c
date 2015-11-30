@@ -15,16 +15,18 @@
 #include "packet.h"
 #include <sys/stat.h>
 #include <math.h> 
+#include <time.h>
 
 #define MAXBUFLEN 100
 
 
-void prepareDataPacket(struct Packet *dataPacket, int currSeqNum, FILE *file, int packetCount, int fileSize)
+void prepareDataPacket(struct Packet *dataPacket, int nextSeqNum, FILE *file, int packetCount, int fileSize)
 {
 	dataPacket->type = DAT;
-	dataPacket->seqNum = currSeqNum;
-	dataPacket->dataSize = currSeqNum == packetCount ?
+	dataPacket->seqNum = nextSeqNum;
+	dataPacket->dataSize = nextSeqNum == packetCount ?
 				fileSize % DATASIZE : DATASIZE;
+	fseek(file, (nextSeqNum - 1) * DATASIZE, SEEK_SET);
 	size_t newLen = fread(dataPacket->data, sizeof(char), dataPacket->dataSize, file);
 	if (newLen == 0)
 	{
@@ -54,20 +56,30 @@ int main(int argc, char *argv[])
 	struct sockaddr_storage their_addr;
 	socklen_t addr_len;
 	char s[INET6_ADDRSTRLEN];
-	char *portnumber;
+	char *portNumber, *windowSize, *probLoss, *probCorr;
 	
 	int CWND;
+	float pLoss, pCorr;
 /*
-	if (argc != 3) {
-		fprintf(stderr,"usage: server portnumber windowsize\n");
+	if (argc != 5) {
+		fprintf(stderr,"usage: server portNumber windowSize probLoss probCorr\n");
 		exit(1);
 	}
-	portnumber = argv[1];
-	CWND = argv[2];
+	portNumber = argv[1];
+	windowSize = argv[2];
+	probLoss = argv[3];
+	probCorr = argv[4;
 */
-	portnumber = "4444";
-	CWND = 3;
+	portNumber = "4444";
+	windowSize = "4";
+	probLoss = "0.5";
+	probCorr = "0.1";
 
+	CWND = atoi(windowSize);
+	pLoss = atof(probLoss);
+	pCorr = atof(probCorr);
+
+//zzzzz check values
 
 ///////////////////////
 ///////////////////////
@@ -76,7 +88,7 @@ int main(int argc, char *argv[])
 	hints.ai_socktype = SOCK_DGRAM;
 	hints.ai_flags = AI_PASSIVE; // use my IP
 
-	if ((rv = getaddrinfo(NULL, portnumber, &hints, &servinfo)) != 0) {
+	if ((rv = getaddrinfo(NULL, portNumber, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
 		return 1;
 	}
@@ -138,17 +150,23 @@ int main(int argc, char *argv[])
 
 	int packetCount = (int)ceil((float)st.st_size / DATASIZE);
 	struct Packet dataPacket, ackPacket, finPacket;
-	FILE *file = fopen(fileName, "r");
+	FILE *file = fopen(fileName, "rb");
 	
 	if(file == NULL)
 	{
 		printf("Cannot open file\n");
-		//send FIN
+		//zzzzzsend FIN
 		exit(0);
 	}
 	int base = 1;
 	int inFlight = 0;
-	int currSeqNum = 1;
+	int nextSeqNum = 1;
+
+	fd_set readSet;	
+
+	
+	
+	srand(time(NULL));
 	while(1)
 	{
 		if(base > packetCount)	///zzzzzzzzzz
@@ -156,11 +174,11 @@ int main(int argc, char *argv[])
 			printf("base: %d, packetCount: %d\n", base, packetCount);
 			break;
 		}
-		int i, temp = currSeqNum;
+		int i, temp = nextSeqNum;
 
-		for(i = 0; i < base + CWND - temp && currSeqNum <= packetCount; i++)
+		for(i = 0; i < base + CWND - temp && nextSeqNum <= packetCount; i++)
 		{
-			prepareDataPacket(&dataPacket, currSeqNum, file, packetCount, st.st_size);
+			prepareDataPacket(&dataPacket, nextSeqNum, file, packetCount, st.st_size);
 			if ((numbytes = sendto(sockfd, &dataPacket, sizeof(dataPacket), 0,
 						 (struct sockaddr *)&their_addr, addr_len)) == -1) {
 					perror("server: sendto");
@@ -170,37 +188,93 @@ int main(int argc, char *argv[])
 			printf("--> sent %d bytes to %s, \tSEQ #%d \n", dataPacket.dataSize, clientIP, dataPacket.seqNum);
 	//		printf("message %d bytes to \"%s\"\n", dataPacket.dataSize, dataPacket.data);
 
-			currSeqNum++;
+			nextSeqNum++;
 			inFlight++;
 		}
 
-		printf("server: waiting for ACKs...\n");
+//		printf("server: waiting for ACKs...\n");
 
-		if ((numbytes = recvfrom(sockfd, &ackPacket, sizeof(ackPacket) , 0,
-			(struct sockaddr *)&their_addr, &addr_len)) == -1) {
-			perror("recvfrom");
-			exit(1);
+		FD_ZERO(&readSet);
+		FD_SET(sockfd, &readSet);
+		struct timeval timeout = {1, 0}; //Timeout in 1 second
+		int res = select(sockfd + 1, &readSet, NULL, NULL, &timeout);
+		if(res < 0)
+		{
+			perror("select()");
+		//	exit(1);
 		}
-		printf("<-- received ACK #%d, base %d\n", ackPacket.seqNum, base);
-		if(ackPacket.seqNum >= base)
-			base = ackPacket.seqNum;
+		else if (res == 0)
+		{
+			printf("<-- Time out for ACK #%d\n", base + 1);
+			nextSeqNum = base;
+		}
+		else
+		{
+			if ((numbytes = recvfrom(sockfd, &ackPacket, sizeof(ackPacket) , 0,
+				(struct sockaddr *)&their_addr, &addr_len)) == -1) {
+				perror("recvfrom");
+				exit(1);
+			}
+
+			float loss = (float)(rand() % 101) / 100;
+			float corrupt = (float)(rand() % 101) / 100;
+			if(loss <= pLoss)
+				printf("<-- ACK #%d received, discarded as loss, base %d\n", ackPacket.seqNum, base);
+			else
+			{
+				if(corrupt <= pCorr)
+					printf("<-- ACK #%d received, discarded as corruption, base %d\n", ackPacket.seqNum, base);
+				else
+				{
+					printf("<-- received ACK #%d, base ", ackPacket.seqNum);
+					if(ackPacket.seqNum >= base)
+					{	
+						printf("changed from %d to %d\n", base, ackPacket.seqNum);
+						base = ackPacket.seqNum;
+					}
+					else
+						printf("%d unchanged\n", base);
+				}
+			}
+		}
 	}
 ////////////////////
 ////////////////////
-	fclose(file);
+	
 	
 	finPacket.type = FIN;
-	finPacket.seqNum = currSeqNum;
+	finPacket.seqNum = nextSeqNum;
 	finPacket.dataSize = 0;
 	finPacket.data[0] = '\0';
-
+	
 	if ((numbytes = sendto(sockfd, &finPacket, sizeof(finPacket), 0,
-						 (struct sockaddr *)&their_addr, addr_len)) == -1) {
-					perror("server: sendto");
-					exit(1);
-				}
-	printf("--> sent FIN to %s, \t\tSEQ #%d\n", clientIP, finPacket.seqNum);
+		(struct sockaddr *)&their_addr, addr_len)) == -1) {
+			perror("server: sendto");
+			exit(1);
+		}
+	printf("--> sent FIN to %s\n", clientIP);
+
+	while(1)
+	{
+		if ((numbytes = recvfrom(sockfd, &ackPacket, sizeof(ackPacket) , 0,
+			(struct sockaddr *)&their_addr, &addr_len)) == -1) {
+				perror("recvfrom");
+				exit(1);
+			}
+		if(ackPacket.type == FIN)
+		{
+			printf("<-- received FIN from %s\n", clientIP);
+			printf("server closing down connection\n");
+			break;
+		}
+		else
+		{
+				printf("<-- received something other than FIN from %s\n", clientIP);
+		}
+	}
+	fclose(file);
 	close(sockfd);
 
 	return 0;
 }
+

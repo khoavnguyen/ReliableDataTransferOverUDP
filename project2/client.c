@@ -13,7 +13,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include "packet.h"
-
+#include <time.h>
 
 int main(int argc, char *argv[])
 {
@@ -21,19 +21,28 @@ int main(int argc, char *argv[])
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
 	int numbytes;
-	char *serverIP, *portnumber, *filename;
+	char *serverIP, *portnumber, *filename, *probLoss, *probCorr;
+	float pLoss, pCorr;
 /*
-	if (argc != 4) {
-		fprintf(stderr,"usage: client serverIP portnumber filename\n");
+	if (argc != 6) {
+		fprintf(stderr,"usage: client serverIP portnumber filename probLoss probCorr\n");
 		exit(1);
 	}
 	serverIP = argv[1];
 	portnumber = argv[2];
 	filename = argv[3];
+	probLoss = argv[4];
+	probCorr = argv[5];
 */
 	serverIP = "127.0.0.1";
 	portnumber = "4444";
 	filename = "test.jpg";
+	probLoss = "0.1";
+	probCorr = "0.1";
+
+	pLoss = atof(probLoss);
+	pCorr = atof(probCorr);
+//zzzzz check values
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
@@ -90,38 +99,74 @@ int main(int argc, char *argv[])
 	ackPacket.seqNum = 0;
 	ackPacket.dataSize = 0;
 	ackPacket.data[0] = '\0';
+
+	int expectedSeqNum = 1;
 	while(1)
 	{
-		printf("client: waiting for server...\n");
+//		printf("client: waiting for server...\n");
 		if ((numbytes = recvfrom(sockfd, &dataPacket, sizeof(dataPacket) , 0,
 			p->ai_addr, &p->ai_addrlen)) == -1) {
 			perror("recvfrom");
 			exit(1);
-		}
+		}	
+
 		if(dataPacket.type == FIN)
 		{
-			printf("<-- received FIN from %s, \t\tSEQ #%d\n", serverIP, dataPacket.seqNum);
+			printf("<-- received FIN from %s\n", serverIP);
 			break;
 		}
 
-		printf("<-- received %d bytes from %s, \tSEQ #%d\n", dataPacket.dataSize, serverIP, dataPacket.seqNum );
-		
-//		printf("client: packet contains \"%s\", %d bytes\n", dataPacket.data, dataPacket.dataSize);
+		float loss = (float)(rand() % 101) / 100;
+		float corrupt = (float)(rand() % 101) / 100;
+		if(loss <= pLoss)
+			printf("<-- packet SEQ #%d received, discarded as loss\n", dataPacket.seqNum);
+		else
+		{
+			if(corrupt <= pCorr)
+			{
+				printf("<-- packet SEQ #%d received, discarded as corruption\n", dataPacket.seqNum);
+				printf("--> sent repeated ACK to %s,\t\tACK #%d\n", serverIP, ackPacket.seqNum);
+			}
+			else
+			{
+				if(dataPacket.seqNum == expectedSeqNum)
+				{
+					printf("<-- received %d bytes from %s, \tSEQ #%d\n", dataPacket.dataSize, serverIP, dataPacket.seqNum );
+			//		printf("client: packet contains \"%s\", %d bytes\n", dataPacket.data, dataPacket.dataSize);
 
-		fwrite(dataPacket.data, sizeof(char), dataPacket.dataSize, file);
-	
-		ackPacket.seqNum = dataPacket.seqNum + 1;
-		if ((numbytes = sendto(sockfd, &ackPacket, sizeof(ackPacket), 0,
-			 p->ai_addr, p->ai_addrlen)) == -1) {
-		perror("client: sendto");
-		exit(1);
+					fwrite(dataPacket.data, sizeof(char), dataPacket.dataSize, file);
+					expectedSeqNum++;
+					ackPacket.seqNum = expectedSeqNum;
+					printf("--> sent new ACK to %s,\t\t\tACK #%d\n", serverIP, ackPacket.seqNum);
+				}
+				else
+				{	
+					printf("<-- received out of order packet from %s, \tSEQ #%d\n", serverIP, dataPacket.seqNum);
+					printf("--> sent repeated ACK to %s,\t\tACK #%d\n", serverIP, ackPacket.seqNum);
+				}
+			}
+			if ((numbytes = sendto(sockfd, &ackPacket, sizeof(ackPacket), 0,
+						 p->ai_addr, p->ai_addrlen)) == -1) {
+					perror("client: sendto");
+					exit(1);
+			}
+		}
 	}
-	}
 
+	struct Packet finPacket;
+	finPacket.type = FIN;
+	finPacket.seqNum = expectedSeqNum;
+	finPacket.dataSize = 0;
+	finPacket.data[0] = '\0';
 
+	if ((numbytes = sendto(sockfd, &finPacket, sizeof(finPacket), 0,
+						 p->ai_addr, p->ai_addrlen)) == -1) {
+					perror("client: sendto");
+					exit(1);
+			}
+	printf("--> sent FIN to %s\n", serverIP);
+	printf("client closing down connection\n");
 	fclose(file);
-	
-
 	freeaddrinfo(servinfo);
 	close(sockfd);
 
