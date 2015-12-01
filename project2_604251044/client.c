@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
 	int numbytes;
 	char *serverIP, *portnumber, *filename, *probLoss, *probCorr;
 	float pLoss, pCorr;
-/*
+
 	if (argc != 6) {
 		fprintf(stderr,"usage: client serverIP portnumber filename probLoss probCorr\n");
 		exit(1);
@@ -33,12 +33,14 @@ int main(int argc, char *argv[])
 	filename = argv[3];
 	probLoss = argv[4];
 	probCorr = argv[5];
-*/
+
+	/*
 	serverIP = "127.0.0.1";
 	portnumber = "4444";
 	filename = "test.jpg";
 	probLoss = "0.1";
 	probCorr = "0.1";
+	*/
 
 	pLoss = atof(probLoss);
 	pCorr = atof(probCorr);

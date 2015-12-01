@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
 	
 	int CWND;
 	float pLoss, pCorr;
-/*
+
 	if (argc != 5) {
 		fprintf(stderr,"usage: server portNumber windowSize probLoss probCorr\n");
 		exit(1);
@@ -68,12 +68,14 @@ int main(int argc, char *argv[])
 	portNumber = argv[1];
 	windowSize = argv[2];
 	probLoss = argv[3];
-	probCorr = argv[4;
-*/
+	probCorr = argv[4];
+
+	/*
 	portNumber = "4444";
 	windowSize = "4";
 	probLoss = "0.5";
 	probCorr = "0.1";
+	*/
 
 	CWND = atoi(windowSize);
 	pLoss = atof(probLoss);
