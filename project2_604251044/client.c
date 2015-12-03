@@ -44,7 +44,18 @@ int main(int argc, char *argv[])
 
 	pLoss = atof(probLoss);
 	pCorr = atof(probCorr);
-//zzzzz check values
+
+	if(pLoss < 0 || pLoss > 1)
+	{
+		fprintf(stderr,"usage: probLoss should be between 0 and 1\n");
+		exit(1);
+	}
+
+	if(pCorr < 0 || pCorr > 1)
+	{
+		fprintf(stderr,"usage: probCorr should be between 0 and 1\n");
+		exit(1);
+	}
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
@@ -115,16 +126,17 @@ int main(int argc, char *argv[])
 		if(dataPacket.type == FIN)
 		{
 			printf("<-- received FIN from %s\n", serverIP);
+			printf("FIN message is \"%s\"\n", dataPacket.data);
 			break;
 		}
 
 		float loss = (float)(rand() % 101) / 100;
 		float corrupt = (float)(rand() % 101) / 100;
-		if(loss <= pLoss)
+		if(pLoss > 0 && loss <= pLoss)
 			printf("<-- packet SEQ #%d received, discarded as loss\n", dataPacket.seqNum);
 		else
 		{
-			if(corrupt <= pCorr)
+			if(pCorr > 0 && corrupt <= pCorr)
 			{
 				printf("<-- packet SEQ #%d received, discarded as corruption\n", dataPacket.seqNum);
 				printf("--> sent repeated ACK to %s,\t\tACK #%d\n", serverIP, ackPacket.seqNum);
@@ -158,8 +170,8 @@ int main(int argc, char *argv[])
 	struct Packet finPacket;
 	finPacket.type = FIN;
 	finPacket.seqNum = expectedSeqNum;
-	finPacket.dataSize = 0;
-	finPacket.data[0] = '\0';
+	strcpy(finPacket.data, "File received.");
+	finPacket.dataSize = strlen(finPacket.data);
 
 	if ((numbytes = sendto(sockfd, &finPacket, sizeof(finPacket), 0,
 						 p->ai_addr, p->ai_addrlen)) == -1) {

@@ -80,8 +80,24 @@ int main(int argc, char *argv[])
 	CWND = atoi(windowSize);
 	pLoss = atof(probLoss);
 	pCorr = atof(probCorr);
+	
+	if(CWND < 1 || CWND > 50)
+	{
+		fprintf(stderr,"usage: CWND should be between 1 and 50\n");
+		exit(1);
+	}
 
-//zzzzz check values
+	if(pLoss < 0 || pLoss > 1)
+	{
+		fprintf(stderr,"usage: probLoss should be between 0 and 1\n");
+		exit(1);
+	}
+
+	if(pCorr < 0 || pCorr > 1)
+	{
+		fprintf(stderr,"usage: probCorr should be between 0 and 1\n");
+		exit(1);
+	}
 
 ///////////////////////
 ///////////////////////
@@ -142,22 +158,47 @@ int main(int argc, char *argv[])
 	char *fileName = reqPacket.data;
 	struct stat st;
 
+
+
+	
+	struct Packet dataPacket, ackPacket, finPacket;
+
 	if (stat(fileName, &st) == -1) 
 	{
-		printf("%s\n", fileName);
+		printf("File not found: %s\n", fileName);
 		perror("stat");
 
+		finPacket.type = FIN;
+		finPacket.seqNum = 0;
+		strcpy(finPacket.data, "File not found.");
+		finPacket.dataSize = strlen(finPacket.data);
+	
+		if ((numbytes = sendto(sockfd, &finPacket, sizeof(finPacket), 0,
+			(struct sockaddr *)&their_addr, addr_len)) == -1) {
+				perror("server: sendto");
+				exit(1);
+			}
+		printf("--> sent FIN to %s\n", clientIP);
 		exit(0);
    }
 
-	int packetCount = (int)ceil((float)st.st_size / DATASIZE);
-	struct Packet dataPacket, ackPacket, finPacket;
 	FILE *file = fopen(fileName, "rb");
 	
 	if(file == NULL)
 	{
 		printf("Cannot open file\n");
-		//zzzzzsend FIN
+		
+		finPacket.type = FIN;
+		finPacket.seqNum = 0;
+		strcpy(finPacket.data, "Cannot open file.");
+		finPacket.dataSize = strlen(finPacket.data);
+	
+		if ((numbytes = sendto(sockfd, &finPacket, sizeof(finPacket), 0,
+			(struct sockaddr *)&their_addr, addr_len)) == -1) {
+				perror("server: sendto");
+				exit(1);
+			}
+		printf("--> sent FIN to %s\n", clientIP);
 		exit(0);
 	}
 	int base = 1;
@@ -167,13 +208,14 @@ int main(int argc, char *argv[])
 	fd_set readSet;	
 
 	
-	
+	int packetCount = (int)ceil((float)st.st_size / DATASIZE);
 	srand(time(NULL));
 	while(1)
 	{
 		if(base > packetCount)	///zzzzzzzzzz
 		{
-			printf("base: %d, packetCount: %d\n", base, packetCount);
+	//		printf("base: %d, packetCount: %d\n", base, packetCount);
+			printf("File transfer completed.\n");
 			break;
 		}
 		int i, temp = nextSeqNum;
@@ -220,16 +262,16 @@ int main(int argc, char *argv[])
 
 			float loss = (float)(rand() % 101) / 100;
 			float corrupt = (float)(rand() % 101) / 100;
-			if(loss <= pLoss)
+			if(pLoss > 0 && loss <= pLoss)
 				printf("<-- ACK #%d received, discarded as loss, base %d\n", ackPacket.seqNum, base);
 			else
 			{
-				if(corrupt <= pCorr)
+				if(pCorr > 0 && corrupt <= pCorr)
 					printf("<-- ACK #%d received, discarded as corruption, base %d\n", ackPacket.seqNum, base);
 				else
 				{
 					printf("<-- received ACK #%d, base ", ackPacket.seqNum);
-					if(ackPacket.seqNum >= base)
+					if(ackPacket.seqNum > base)
 					{	
 						printf("changed from %d to %d\n", base, ackPacket.seqNum);
 						base = ackPacket.seqNum;
@@ -246,8 +288,8 @@ int main(int argc, char *argv[])
 	
 	finPacket.type = FIN;
 	finPacket.seqNum = nextSeqNum;
-	finPacket.dataSize = 0;
-	finPacket.data[0] = '\0';
+	strcpy(finPacket.data, "File sent.");
+	finPacket.dataSize = strlen(finPacket.data);
 	
 	if ((numbytes = sendto(sockfd, &finPacket, sizeof(finPacket), 0,
 		(struct sockaddr *)&their_addr, addr_len)) == -1) {
@@ -266,6 +308,7 @@ int main(int argc, char *argv[])
 		if(ackPacket.type == FIN)
 		{
 			printf("<-- received FIN from %s\n", clientIP);
+			printf("FIN message is \"%s\"\n", ackPacket.data);
 			printf("server closing down connection\n");
 			break;
 		}
